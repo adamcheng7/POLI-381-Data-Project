@@ -1,0 +1,1071 @@
+---
+title: "POLI 381 Data Project – Data Quality Control"
+author: "Adam Cheng"
+bibliography: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/bibliography/data_quality_control/data_quality_control_citations.bib
+csl: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/bibliography/citation_styles/apa_6th_edition.csl
+format:
+    html:
+      theme: cosmo
+      fontsize: 14px
+      page-layout: article
+      html-math-method: mathjax
+      grid:
+        sidebar-width: 250px
+        body-width: 950px
+        margin-width: 250px
+        gutter-width: 1.5rem
+      code-links:
+      - text: Project Repository
+        icon: github
+        href: https://github.com/adamcheng7/POLI-381-Data-Project
+      number-sections: true
+      toc: true
+      toc-expand: true
+      toc-location: left
+      df-print: kable
+      code-fold: true
+      self-contained: true
+execute:
+  echo: false
+  warning: false
+  message: false
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Introduction
+
+This project aims to study how economic performance influences public approval of national governments over time. The dataset has 9 variables covering 111 countries between 1990-2023.
+
+```{r}
+#| label: loading_packages
+#| output: false
+
+# List of necessary packages
+packages <- c("tidyverse", "repr", "janitor", "haven", "GGally", 
+              "sf", "rnaturalearth", "rnaturalearthdata", "ggrepel", "ggExtra","DescTools")
+
+# Install packages that are not installed
+new_packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new_packages) > 0) install.packages(new_packages)
+
+# Loading the necessary R packages
+library(tidyverse)
+library(repr)
+library(janitor)
+library(haven)
+library(GGally)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(ggrepel)
+library(ggExtra)
+library(DescTools)
+
+# Setting seed for reproducibility
+set.seed(2025)
+
+# Disabling scientific notations
+options(scipen = 999)
+```
+
+```{r}
+#| label: tbl-dataset_sample
+#| tbl-cap: "**A sample of the dataset (filtered by `USA`)**.<br>Each column represents a variable, each row represents an observation, and each cell represents a value to its corresponding variable"
+
+# Reading final version of the dataset
+
+data_set_url<-"https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/data/complete_dataset.csv"
+
+final_dataset<-read_csv(data_set_url)|>
+  mutate(country_name=as_factor(country_name),
+         country_code=as_factor(country_code))|>
+  filter(year>=1990) # Filter all observations to 1990 or above only
+
+head(final_dataset|>filter(country_code=="USA"))
+```
+
+## Country Coverage
+
+```{r}
+#| label: fig-country_coverage
+#| fig-width: 10
+#| fig-height: 8
+#| fig-cap: "Map showing the dataset's geographical coverage. Countries covered by the dataset are shaded blue and countries with no observations are coloured white"
+
+# Load world map data
+world_data <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Extract unique country codes from final_dataset
+observed_countries <- final_dataset|>
+  distinct(country_code)|>
+  pull(country_code)
+
+# Create a new column indicating whether a country has observations
+world_data <- world_data|>
+  mutate(has_data = ifelse(iso_a3_eh %in% observed_countries, "Has observations", "No observations"))
+
+# Plot the world map
+
+countries_map_plot<-world_data|>
+  ggplot() +
+  geom_sf(aes(fill = has_data),color = "black",size=0.5) +
+  scale_fill_manual(
+    values = c("Has observations" = "#3e83b8", "No observations" = "white"),
+    name = "Data Availability:"
+    ) +
+  theme_minimal() +
+  theme(legend.position = "bottom",legend.direction = "horizontal")
+
+countries_map_plot
+```
+
+@fig-country_coverage shows the dataset covers a wide range of countries, enhancing the external validity of the analysis.
+
+# Data Quality Assessment
+
+Variables will be individually examined in concise paragraphs due to the scale of the dataset and constraints of word count.
+
+```{r}
+#| label: functions-univariate_qc
+#| output: false
+
+# Constructing Functions
+
+## Diagnosis Table Function
+
+diagnosis_table <- function(data, variables){
+  data |>
+    select(all_of(variables)) |>
+    map_df(~{
+      q1 <- quantile(., 0.25, na.rm=TRUE)
+      q3 <- quantile(., 0.75, na.rm=TRUE)
+      iqr_val <- q3 - q1
+      lower_bound <- q1 - 1.5 * iqr_val
+      upper_bound <- q3 + 1.5 * iqr_val
+      outlier_count <- sum(. < lower_bound | . > upper_bound, na.rm=TRUE)
+      
+      tibble(
+        Type = typeof(.),
+        `Unique Values` = n_distinct(., na.rm=TRUE),
+        `Total Values` = sum(!is.na(.)),
+        `Missing Values` = sum(is.na(.)),
+        `Missing Proportion` = mean(is.na(.))*100,
+        `Outliers Count` = outlier_count,
+        `Zero Count` = sum(. == 0, na.rm=TRUE)
+      )
+    }, .id = "Variable")
+}
+
+
+## Quantitative Summary Table Function
+
+quantitative_summary <- function(data, variables) {
+  data |> 
+    select(all_of(variables)) |> 
+    map_df(~tibble(
+      `Mean` = mean(., na.rm = TRUE),
+      `Standard Deviation` = sd(., na.rm = TRUE),
+      `Minimum` = min(., na.rm = TRUE),
+      `5th Percentile` = quantile(., 0.05, na.rm = TRUE),
+      `25th Percentile` = quantile(., 0.25, na.rm = TRUE),
+      `Median` = median(., na.rm = TRUE),
+      `75th Percentile` = quantile(., 0.75, na.rm = TRUE),
+      `95th Percentile` = quantile(., 0.95, na.rm = TRUE),
+      `Maximum` = max(., na.rm = TRUE)
+    ), .id = "Variable")
+}
+
+## Kernel Density Estimation Plots Function
+
+generate_kde_plot <- function(data, variable, x_label, bw = NULL) {
+  kde_layer <- if (!is.null(bw)) {
+    geom_density(kernel="gaussian",alpha = 0.4, color = "black", bw = bw)
+  } else {
+    geom_density(kernel="gaussian",alpha = 0.4, color = "black")
+  }
+
+  kde_plot <- ggplot(data, aes(x = .data[[variable]])) +
+    kde_layer +
+    geom_rug(sides="b", alpha=0.5)+
+    labs(x = x_label, y = "Density") +
+    scale_x_continuous(breaks = scales::breaks_extended(n = 10), labels = scales::comma) +
+    theme_minimal() +
+    theme(
+      axis.title.x = element_text(size = 14, margin = margin(t = 10)),
+      axis.title.y = element_text(size = 14, margin = margin(r = 10)),
+      axis.text.x = element_text(size = 12),
+      axis.text.y = element_text(size = 12)
+    )
+  
+  kde_plot
+  
+}
+
+## Quantile Plots Function
+
+generate_quantile_plot <- function(data, variable, y_label,top_outliers_n = 1, bottom_outliers_n = 1) {
+  qq_data <- data |> 
+    select(country_code, year, all_of(variable)) |> 
+    na.omit() |> 
+    mutate(theoretical = qqnorm(.data[[variable]], plot.it = FALSE)$x,
+           sample = qqnorm(.data[[variable]], plot.it = FALSE)$y)
+  
+  top_outliers <- qq_data |> arrange(desc(sample)) |> slice_head(n = top_outliers_n)
+  bottom_outliers <- qq_data |> arrange(sample) |> slice_head(n = bottom_outliers_n)
+  outliers <- bind_rows(top_outliers, bottom_outliers)
+  
+  qq_plot <- ggplot(data, aes(sample = .data[[variable]])) +
+    geom_qq(color = "black") + 
+    stat_qq_line(color = "red",linetype="dashed") +
+    geom_point(data = outliers, aes(x = theoretical, y = sample), color = "red") +
+    geom_text_repel(
+      data = outliers,
+      aes(x = theoretical, y = sample,
+          label = paste0(country_code, ", ", year, " (", round(.data[[variable]], 0), ")")),
+          size = 3, box.padding = 1, point.padding = 1, segment.size = 0.5,
+          segment.color = "black", force = 2) +
+    scale_y_continuous(breaks = scales::breaks_extended(n = 10), labels = scales::comma) +
+    labs(x = "Normal Distribution Quantiles", y = paste(y_label)) +
+    theme_minimal() +
+    theme(
+      axis.title.x = element_text(size = 14, margin = margin(t = 10)),
+      axis.title.y = element_text(size = 14, margin = margin(r = 10)),
+      axis.text.x = element_text(size = 12),
+      axis.text.y = element_text(size = 12)
+    )
+  qq_plot
+}
+
+print("Functions successfully created")
+```
+
+## gdp_pc
+
+**GDP per capita in 2021 PPP USD (\$)** from @wb is a covariate accounting for countries' base income level, calculated by: $$\frac{(\text{Consumption} + \text{Investment} + \text{Government Spending} - \text{Net Exports})}{\text{Population}}$$ with currency converted to 2021 US [purchasing power parity rates](https://databank.worldbank.org/metadataglossary/world-development-indicators/series/NY.GDP.PCAP.PP.KD).
+
+```{r}
+#| label: tbl-gdp_pc
+#| tbl-cap: "**Tables for `gdp_pc`**.<br>*Subsequent tables under this section will share the same format and comments will be kept brief*"
+#| tbl-subcap:
+#| - "Data diagnosis table. Each column represents a diagnostic metric for the variable and outliers are classified based on the 1.5 IQR rule"
+#| - "Summary statistics table. Each column represents a summary statistic for the variable"
+
+# Diagnosis table
+
+gdp_pc_diagnosis<-final_dataset|>
+  diagnosis_table("gdp_pc")
+
+gdp_pc_diagnosis
+
+# Descriptive statistics table
+
+gdp_pc_summary<-final_dataset|>
+  quantitative_summary("gdp_pc")
+
+gdp_pc_summary
+```
+
+```{r}
+#| layout-ncol: 2
+#| label: fig-gdp_pc
+#| fig-width: 10
+#| fig-height: 9
+#| fig-cap: "**Kernel density estimation (KDE) and quantile plots for `gdp_pc`**.<br>*Subsequent plots under this section will share the same format and comments will be kept brief*"
+#| fig-subcap: 
+#|   - "KDE plot of `gdp_pc` (Gaussian kenerl and a bandwidth of 2000 is used). The x-axis indicates values of the variable and the y-axis represents the proportion of data at each value, such that the area under the curve equals 1. A rug plot is provided at the bottom with each tick mark representing a value of the variable"
+#|   - "Quantile plot for `gdp_pc`. The x-axis indicates quantiles of a normal distribution and the y-axis represents quantiles of the variable. Points aligning with the red reference line suggest the variable follows a normal distribution. Red data points highlight the minimum/maximum values, labeled with their corresponding [ISO3 country code](https://www.nationsonline.org/oneworld/country_code_list.htm), year, and value"
+
+# KDE Plot
+
+gdp_pc_kde<-final_dataset|>
+  generate_kde_plot(
+    "gdp_pc",
+    "GDP per Capita in 2021 PPP USD ($)",
+    bw=2000)
+
+gdp_pc_kde
+
+# Quantile Plot
+
+gdp_pc_quantile<-final_dataset|>
+  generate_quantile_plot(
+    "gdp_pc",
+    "GDP per Capita in 2021 PPP USD ($)",
+    bottom_outliers_n=0)
+
+gdp_pc_quantile
+
+```
+
+@fig-gdp_pc suggests the distribution of `gdp_pc` is right-skewed with considerable variation and no notable gaps in data. @tbl-gdp_pc-2 supports this skewness, as the mean (\$23,035.64) exceeds the median (\$14,954.72), reflecting the historically substantial income disparities between countries.
+
+## gdp_pc_growth
+
+**% change of `gdp_pc` from the previous year** derived using R, the independent variable measuring economic performance of countries over time.
+
+```{r}
+#| label: tbl-gdp_pc_growth
+#| tbl-cap: "**Tables for `gdp_pc_growth`**"
+#| tbl-subcap:
+#| - "Data diagnosis table"
+#| - "Summary statistics table"
+
+# Diagnosis table
+
+gdp_pc_growth_diagnosis<-final_dataset|>
+  diagnosis_table("gdp_pc_growth")
+
+gdp_pc_growth_diagnosis
+
+# Descriptive statistics table
+
+gdp_pc_growth_summary<-final_dataset|>
+  quantitative_summary("gdp_pc_growth")
+
+gdp_pc_growth_summary
+```
+
+```{r}
+#| layout-ncol: 2
+#| label: fig-gdp_pc_growth
+#| fig-width: 10
+#| fig-height: 9
+#| fig-cap: "**KDE and quantile plots for `gdp_pc_growth`**"
+#| fig-subcap: 
+#|   - "KDE plot for `gdp_pc_growth`. Bandwidth is set to 0.5"
+#|   - "Quantile plot for `gdp_pc_growth`"
+
+# KDE Plot
+
+gdp_pc_growth_kde<-final_dataset|>
+  generate_kde_plot(
+    "gdp_pc_growth",
+    "% Change of PPP GDP per Capita from Previous Year",
+    bw=0.5)
+
+gdp_pc_growth_kde
+
+# Quantile Plot
+
+gdp_pc_growth_quantile<-final_dataset|>
+  generate_quantile_plot(
+    "gdp_pc_growth",
+    "% Change of PPP GDP per Capita from Previous Year"
+    )
+
+gdp_pc_growth_quantile
+
+```
+
+@fig-gdp_pc_growth suggests `gdp_pc_growth` has a roughly symmetric (slight left-skew) distribution with no notable gaps in data, numerous outliers (281, @tbl-gdp_pc_growth-1), and considerable variation that reflect positive and negative economic shocks useful to the analysis.
+
+## approval_smoothed
+
+**Approval of national government (% of survey respondents) smoothed via exponential smoothing** from @eap is the dependent variable measuring public approval. `approval_smoothed` is measured by collecting survey data from numerous sources asking respondents from countries with competitive elections whether they approve their executives.
+
+```{r}
+#| label: tbl-approval_smoothed
+#| tbl-cap: "**Tables for `approval_smoothed`**"
+#| tbl-subcap:
+#| - "Data diagnosis table"
+#| - "Summary statistics table"
+
+# Diagnosis table
+
+approval_smoothed_diagnosis<-final_dataset|>
+  diagnosis_table("approval_smoothed")
+
+approval_smoothed_diagnosis
+
+# Descriptive statistics table
+
+approval_smoothed_summary<-final_dataset|>
+  quantitative_summary("approval_smoothed")
+
+approval_smoothed_summary
+```
+
+```{r}
+#| layout-ncol: 2
+#| label: fig-approval_smoothed
+#| fig-width: 10
+#| fig-height: 9
+#| fig-cap: "**KDE and quantile plots `approval_smoothed`**"
+#| fig-subcap: 
+#|   - "KDE plot for `approval_smoothed`. Bandwidth is set to 2.5"
+#|   - "Quantile plot for `approval_smoothed`"
+
+# KDE Plot
+
+approval_smoothed_kde<-final_dataset|>
+  generate_kde_plot(
+    "approval_smoothed",
+    "Approval of National Government (% of Survey Respondents)",
+    bw=2.5)
+
+approval_smoothed_kde
+
+# Quantile Plot
+
+approval_smoothed_quantile<-final_dataset|>
+  generate_quantile_plot(
+    "approval_smoothed",
+    "Approval of National Government (% of Survey Respondents)"
+    )
+
+approval_smoothed_quantile
+
+```
+
+@fig-approval_smoothed suggests the distribution of `approval_smoothed` is roughly symmetric (slight right-skew) with no notable gaps in data. However, @tbl-approval_smoothed-1 highlights rather extreme outliers and large missing data proportions (36.08%); this will be addressed later. Nonetheless, the remaining 1050 values are sufficiently large and representative for the analysis.
+
+## approval_growth
+
+**% change of `approval_smoothed` from the previous year** derived using R, a covariate accounting for `approval_smoothed`'s relative changes that extends comparisons with `gdp_pc_growth`.
+
+```{r}
+#| label: tbl-approval_growth
+#| tbl-cap: "**Tables for `approval_growth`**"
+#| tbl-subcap:
+#| - "Data diagnosis table"
+#| - "Summary statistics table"
+
+# Diagnosis table
+
+approval_growth_diagnosis<-final_dataset|>
+  diagnosis_table("approval_growth")
+
+approval_growth_diagnosis
+
+# Descriptive statistics table
+
+approval_growth_summary<-final_dataset|>
+  quantitative_summary("approval_growth")
+
+approval_growth_summary
+```
+
+```{r}
+#| layout-ncol: 2
+#| label: fig-approval_growth
+#| fig-width: 10
+#| fig-height: 9
+#| fig-cap: "**KDE and quantile plots for `approval_growth`**"
+#| fig-subcap: 
+#|   - "KDE plots for `approval_growth`. Bandwidth is set to 2"
+#|   - "Quantile plot for `approval_growth`"
+
+# KDE Plot
+
+approval_growth_kde<-final_dataset|>
+  generate_kde_plot(
+    "approval_growth",
+    "% Change of Approval of National Government from Previous Year",
+    bw=2)
+
+approval_growth_kde
+
+# Quantile Plot
+
+approval_growth_quantile<-final_dataset|>
+  generate_quantile_plot(
+    "approval_growth",
+    "% Change of Approval of National Government from Previous Year"
+    )
+
+approval_growth_quantile
+
+```
+
+@fig-approval_growth suggests the `approval_growth` distribution is right-skewed with no notable gaps in data and many extreme outliers requiring further examination. Also, @tbl-approval_growth-1 reports 22 zero values, likely attributed to exponential smoothing of `approval_smoothed` instead of genuine stability in approval.
+
+## cpi_growth
+
+**% change of consumer price index (CPI) from the previous year** from @imf, a covariate accounting for inflation. CPI measures the price level of a basket of goods and services typical households consume. The basket and its price are determined by household surveys and supplier data respectively.
+
+```{r}
+#| label: tbl-cpi_growth
+#| tbl-cap: "**Tables for `cpi_growth`**"
+#| tbl-subcap:
+#| - "Data diagnosis table"
+#| - "Summary statistics table"
+
+# Diagnosis table
+
+cpi_growth_diagnosis<-final_dataset|>
+  diagnosis_table("cpi_growth")
+
+cpi_growth_diagnosis
+
+# Descriptive statistics table
+
+cpi_growth_summary<-final_dataset|>
+  quantitative_summary("cpi_growth")
+
+cpi_growth_summary
+```
+
+```{r}
+#| layout-ncol: 2
+#| label: fig-cpi_growth
+#| fig-width: 10
+#| fig-height: 9
+#| fig-cap: "**KDE and quantile plots for `cpi_growth`**"
+#| fig-subcap: 
+#|   - "KDE plot for `cpi_growth`. Default bandwidth by R is applied."
+#|   - "Quantile plot for `cpi_growth`. Minimum value label is hidden due to data point obstruction"
+
+# KDE Plot
+
+cpi_growth_kde<-final_dataset|>
+  generate_kde_plot(
+    "cpi_growth",
+    "% Change of CPI from Previous Year")
+
+cpi_growth_kde
+
+# Quantile Plot
+
+cpi_growth_quantile<-final_dataset|>
+  generate_quantile_plot(
+    "cpi_growth",
+    "% Change of CPI from Previous Year",
+    bottom_outliers_n=0
+    )
+
+cpi_growth_quantile
+```
+
+@fig-cpi_growth-2 indicates an extreme outlier (Congo during its civil war in 1994) flattening the distribution. Logarithmic transformation is required.
+
+```{r}
+#| layout-ncol: 2
+#| label: fig-cpi_growth_log10
+#| fig-width: 10
+#| fig-height: 9
+#| fig-cap: "**KDE and quantile plots for $log_{10}(x+17.12)$ of `cpi_growth` (`cpi_growth_log10`). `cpi_growth` was added by a constant of $17.12$ to shift the minimum value ($-16.12$) to $1$, ensuring only positive values are used for log transformation**"
+#| fig-subcap: 
+#|   - "KDE plot for `cpi_growth_log10`. Bandwidth is set to 0.05"
+#|   - "Quantile plot for `cpi_growth_log10`"
+
+# Logarithmic (Log10) Transformation
+
+final_dataset$cpi_growth_log10<-log(final_dataset$cpi_growth+17.12,base=10)
+
+# KDE Plot
+
+cpi_growth_log10_kde<-final_dataset|>
+  generate_kde_plot(
+    "cpi_growth_log10",
+    "Log10(x+17.12) of % Change of CPI from Previous Year",
+    bw=0.05)
+
+cpi_growth_log10_kde
+
+# Quantile Plot
+
+cpi_growth_log10_quantile<-final_dataset|>
+  generate_quantile_plot(
+    "cpi_growth_log10",
+    "Log10(x+17.12) of % Change of CPI from Previous Year"
+    )
+
+cpi_growth_log10_quantile
+```
+
+Following the transformation in @fig-cpi_growth_log10, the distribution is right-skewed with no notable gaps in data. @fig-cpi_growth_log10-2 also reveals many outliers with greater concentration in the right tail, reflecting the historical tendencies for inflationary crises.
+
+## unemployment_rate
+
+**Unemployment rate (% of labour force)** from @imf, a covariate accounting for unemployment. The variable is measured using labour force surveys, where respondents without work but available and actively seeking work are considered unemployed.
+
+```{r}
+#| label: tbl-unemployment_rate
+#| tbl-cap: "**Tables for `unemployment_rate`**"
+#| tbl-subcap:
+#| - "Data diagnosis table"
+#| - "Summary statistics table"
+
+# Diagnosis table
+
+unemployment_rate_diagnosis<-final_dataset|>
+  diagnosis_table("unemployment_rate")
+
+unemployment_rate_diagnosis
+
+# Descriptive statistics table
+
+unemployment_rate_summary<-final_dataset|>
+  quantitative_summary("unemployment_rate")
+
+unemployment_rate_summary
+```
+
+```{r}
+#| layout-ncol: 2
+#| label: fig-unemployment_rate
+#| fig-width: 10
+#| fig-height: 9
+#| fig-cap: "**KDE and quantile plots for `unemployment_rate`**"
+#| fig-subcap: 
+#|   - "KDE plot for `unemployment_rate`. Bandwidth is set to 0.7"
+#|   - "Quantile plot for `unemployment_rate`.Minimum value label is hidden due to data point obstruction"
+
+# KDE Plot
+
+unemployment_rate_kde<-final_dataset|>
+  generate_kde_plot(
+    "unemployment_rate",
+    "Unemployment Rate (% of Labour Force)",
+    bw=0.7)
+
+unemployment_rate_kde
+
+# Quantile Plot
+
+unemployment_rate_quantile<-final_dataset|>
+  generate_quantile_plot(
+    "unemployment_rate",
+    "Unemployment Rate (% of Labour Force)",
+    bottom_outliers_n=0
+    )
+
+unemployment_rate_quantile
+```
+
+@fig-unemployment_rate suggests the `unemployment_rate` distribution is right-skewed with no notable gaps in data, many outliers and a heavier right tail, reflecting numerous historically high unemployment crises. @tbl-unemployment_rate-1 reports 27% missing proportions, which consistently fluctuates over time as highlighted by @fig-missing_prop, likely due to irregular survey frequencies.
+
+## Visualizing Missingness
+
+```{r}
+#| label: fig-missing_prop
+#| fig-width: 8
+#| fig-height: 5
+#| fig-cap: "Proportion of missing data for each variable (y-axis) over time (x-axis). Dervied variables are omitted because they share the same missingness patterns as their source variable"
+
+# Choosing colors for lines
+
+merged_missingness_colors <- c("approval_smoothed"= "red",
+                               "gdp_pc"=            "blue",
+                               "unemployment_rate"= "black",
+                               "cpi_growth"=        "#008013"
+                               )
+
+# Calculate missing proportions and produce visualization
+
+missingness_viz<-final_dataset|>
+    group_by(year)|>
+    
+    ## Calculates proportion of missing data each year
+    
+    summarize(approval_smoothed = mean(is.na(approval_smoothed)),
+              gdp_pc = mean(is.na(gdp_pc)),
+              unemployment_rate = mean(is.na(unemployment_rate)),
+              cpi_growth = mean(is.na(cpi_growth))
+              )|>
+    
+    ## Pivots the table to a long format for line plot
+    
+    pivot_longer(cols=approval_smoothed:cpi_growth,
+                 names_to="variable",values_to="missing_proportion")|>
+    
+# Producing the line plot
+    
+    ggplot(aes(x=year,y=missing_proportion,color=variable,linetype=variable))+
+    geom_line()+
+    scale_color_manual(values = merged_missingness_colors)+
+    scale_linetype_manual(values=c("solid","solid","solid","solid"))+
+    labs(x="Year",y="Proportion of Missing Data",color="Variable",linetype="Variable")+
+    theme_minimal() +
+    theme(legend.position=c(0.7, 0.7))
+
+missingness_viz
+```
+
+@fig-missing_prop suggests `approval_smoothed` has the most missing data over time, which will be further explored in @fig-missing_approval_country_year. Missingness for other variables is negligible.
+
+```{r}
+#| label: fig-missing_approval_country_year
+#| fig-height: 15
+#| fig-width: 20
+#| fig-cap: "Heatmap of missing `approval_smoothed` values by country (y-axis) and year (x-axis). Blue squares indicate missing values and white squares indicate observed values. Countries are grouped by quartiles of their mean `gdp_pc` between 1990-2023"
+
+# Compute average GDP per capita per country from 1990-2023
+
+gdp_pc_summary <- final_dataset |>
+  group_by(country_name) |>
+  summarise(avg_gdp_pc=mean(gdp_pc, na.rm=TRUE)) |>
+  mutate(gdp_pc_quartiles=cut(avg_gdp_pc,breaks=
+                 quantile(avg_gdp_pc, probs=c(0, 0.25, 0.5, 0.75, 1), na.rm=TRUE), 
+                              labels=c("0-25th Percentile in Mean GDP per Capita", 
+                                       "25-50th Percentile in Mean GDP per Capita",
+                                       "50-75th Percentile in Mean GDP per Capita",
+                                       "75-100th Percentile in Mean GDP per Capita"), 
+                              include.lowest=TRUE))
+
+# Filter out rows where approval_smoothed is missing
+
+filtered_data <- final_dataset |>
+  filter(!is.na(approval_smoothed))
+
+# Create a presence-absence variable
+
+heatmap_data <- filtered_data |>
+  mutate(observed=1) |> 
+  complete(year, country_name, fill=list(observed=0))|>
+  left_join(gdp_pc_summary |> select(country_name, gdp_pc_quartiles), by="country_name")
+
+# Count missing values per country and sort in descending order
+
+country_missing_counts <- heatmap_data |>
+  group_by(country_name) |>
+  summarise(missing_count=sum(observed == 0)) |>
+  arrange(missing_count)
+
+# Merge sorted country order back into the dataset
+
+heatmap_data <- heatmap_data |>
+  mutate(country_name=factor(country_name, levels=country_missing_counts$country_name))
+
+# Generate heatmap faceted by GDP per capita quartiles
+
+missing_heatmap<-heatmap_data|>
+  ggplot(aes(y=country_name, x=year,
+             fill=fct_recode(as_factor(observed),"Available"="1","Unavailable"="0")
+             )) +
+  geom_tile(color="grey90", size=0.2) +
+  scale_fill_manual(values=c("Available"="white","Unavailable"="#3e83b8"),
+                    name="Data Availability:") +
+  theme_minimal() +
+  labs(y="Country", x="Year") +
+  theme(
+    legend.position="bottom",
+    plot.margin=margin(10, 10, 10, 10),
+    text = element_text(size = 15),
+    panel.grid=element_blank()
+  ) +
+  facet_wrap(~ gdp_pc_quartiles, ncol=2, nrow=2, scales="free_y")
+
+missing_heatmap
+```
+
+@fig-missing_approval_country_year suggests missing `approval_smoothed` data correlates with countries' `gdp_pc`, with higher-income countries generally exhibiting less missing data overall—likely due to greater resource capacity for data collection. However, missing data still declined for all countries over time, suggesting confounders like technological advancements likely reduced the cost of survey administration for all countries over time. Other factors, like warfare, can also affect data availability. Recent missing data may reflect delayed data reports as they vary by survey source.
+
+# Independent and Dependent Variable Relationship Assessment
+
+## Theoretical Conjecture
+
+**Denoting Variables**:
+
+-   **Independent variable (**$X$**)**: % change of GDP per capita in 2021 PPP USD from the previous year (`gdp_pc_growth`).
+-   **Dependent variable (**$Y$**)**: Approval of national government smoothed via exponential smoothing (`approval_smoothed`).
+
+**Relationship Rationale**:
+
+-   $X$ is often assumed to be positively correlated with $Y$ because economic performance is a core responsibility of the government that impacts the living standards, happiness, and even survival of the individuals who dictate public approval of their government. Furthermore, individuals often associate their financial hardships with poor governance regardless of whether the government is directly responsible.
+
+**Necessary Considerations**:
+
+-   **Non-linearity**: The relationship between $X$ and $Y$ may not be strictly linear because it can reach a threshold—similar to a concave utility function—where further economic development produces diminishing returns of approval as individuals substitute to other concerns responsible by the government. Potential solutions to address this include
+
+    -   **Non-linear regression (e.g. Lowess)**: Visualizes non-linear patterns on scatter plots.
+    -   **Variable transformation (e.g. logarithmic, exponential)**: Reduces non-linearity, simpler relationship assessment.
+
+-   **Endogeneity**: Occurs when the relationship between $X$ and $Y$ is confounded by unexplained variables influencing $Y$. Omitting these variables from the analysis can result in misleading conclusions about the bivariate relationship. To address this omitted variable bias, I included covariates in the dataset to control for alternative explanations.
+
+-   **Confounds**: Changes in $Y$ may not be solely due to $X$, confounders such as `cpi_growth` or `unemployment_rate` may also influence $Y$ or both $X$ and $Y$.
+
+    -   **Consider `gdp_pc`** (*more confounds explored in stage 6*): The correlation between $X$ and $Y$ may be weaker for high-`gdp_pc` countries because economic performance matters to individuals less compared to those in low-`gdp_pc` countries. To address this, I will
+        1.  Group by countries then calculate for the mean `gdp_pc`,
+        2.  Stratify countries into intervals of mean `gdp_pc` (e.g. quartiles),
+        3.  Run regressions for $X$ and $Y$ in each stratum and analyze changes in correlation using necessary metrics and visualizations.
+
+## Graphical Examination
+
+This section will thoroughly examine the underlying distributions between $X$ and $Y$ using visualizations.
+
+```{r}
+#| label: fig-xy_kde
+#| fig-width: 10
+#| fig-height: 7
+#| fig-cap: "KDE plot of `gdp_pc_growth` and `approval_smoothed` z-scores (ensures a comparable scale) using a bandwidth of 0.15. Rug plots color-coded and separated by variable are added at the bottom, with tick marks representing values"
+
+# Calculating z-scores for gdp_pc_growth and approval_smoothed
+
+standardized_data <- final_dataset |>
+  mutate(
+    gdp_pc_growth_z=(
+    gdp_pc_growth-mean(gdp_pc_growth,na.rm=TRUE))/sd(gdp_pc_growth,na.rm=TRUE),
+    approval_smoothed_z=(
+    approval_smoothed-mean(approval_smoothed,na.rm=TRUE))/sd(approval_smoothed, na.rm=TRUE)
+  )
+  
+standardized_data_pivot<-standardized_data|>
+  pivot_longer(cols=c(gdp_pc_growth_z, approval_smoothed_z),
+                      names_to="Variable", values_to="Value")|>
+  mutate(Variable=
+           recode(Variable,
+                  "gdp_pc_growth_z"="% change of PPP GDP per capita\nfrom previous year",
+                  "approval_smoothed_z"="Approval of national government"))
+
+# Extract values for each variable
+
+gdp_values <- standardized_data_pivot$Value[standardized_data_pivot$Variable == "% change of PPP GDP per capita\nfrom previous year"]
+approval_values <- standardized_data_pivot$Value[standardized_data_pivot$Variable == "Approval of national government"]
+
+# Estimate density with Gaussian kernel and bandwidth 0.15
+
+gdp_density <- density(gdp_values, kernel="gaussian", bw=0.15,na.rm=TRUE)
+approval_density <- density(approval_values, kernel="gaussian",bw=0.15,na.rm=TRUE)
+
+# Plot the first density curve (GDP)
+
+plot(gdp_density, type="l", col="black", lwd=1.5, lty=1, 
+     xlab="Z-scores", ylab="Density", main="", 
+     ylim=c(0, max(gdp_density$y, approval_density$y)))
+
+# Add the second density curve (Approval)
+
+lines(approval_density, col="red", lwd=1.5, lty=2)
+
+# Add x-axis rugs for each group
+
+rug(gdp_values, side = 1, line = 0, col = "black", tck = 0.015) # GDP
+rug(approval_values, side = 1, line = -0.5, col = "red", tck = 0.015) # Approval
+
+# Add legend
+
+legend("topright", legend=c(
+  "% change of PPP GDP per capita\nfrom previous year", 
+  "Approval of national government"
+  ), 
+  col=c("black", "red"), lty=c(1, 2), lwd=1.5, bty="n", 
+  xpd=TRUE, inset=c(0.05, 0.1))
+```
+
+@fig-xy_kde indicates both variables share similar distribution shapes, i.e., unimodal and roughly symmetric. While $Y$ appears more spread out overall and $X$ is more concentrated at its centre, the rug plots reveal $X$ exhibiting a wider range with more extreme outliers on both ends.
+
+```{r}
+#| label: fig-xy_qq
+#| layout-ncol: 2
+#| fig-width: 7
+#| fig-height: 7
+#| fig-cap: "**Quantile-Quantile (Q-Q) plots comparing quantiles of `gdp_pc_growth` (x-axis) and `approval_smoothed` (y-axis) z-scores. Standardization is used to ensure comparability and easier interpretation of the 45-degree line**"
+#| fig-subcap: 
+#|   - "Q-Q plot for `gdp_pc_growth` and `approval_smoothed` with default axes limits"
+#|   - "Q-Q plot for `gdp_pc_growth` and `approval_smoothed` with axes limits set to (-6, 6) for clearer visual assessment of the distribution"
+
+# Q-Q Plot without changing x and y limit
+
+par(pty = "s")
+
+qqplot(
+       standardized_data$gdp_pc_growth_z, standardized_data$approval_smoothed_z,
+       xlab = "% change of PPP GDP per capita\nfrom previous year z-score",
+       ylab = "Approval of national government z-score",
+       pch = 21,
+         col = "black",
+         bg  = "gray90",
+         lwd = 1,
+       asp = 1,
+)
+
+abline(0, 1, col = "red", lty = 2, lwd = 1.5)
+
+# Q-Q Plot with x and y limit set to (-6,6)
+
+par(pty = "s")
+
+qqplot(
+       standardized_data$gdp_pc_growth_z, standardized_data$approval_smoothed_z,
+       xlab = "% change of PPP GDP per capita\nfrom previous year z-score",
+       ylab = "Approval of national government z-score",
+       pch = 21,
+         col = "black",
+         bg  = "gray90",
+         lwd = 1,
+       asp = 1,
+       xlim = c(-6, 6), # Setting x-axis limits
+       ylim = c(-6, 6)  # Setting y-axis limits
+)
+
+abline(0, 1, col = "red", lty = 2, lwd = 1.5)
+```
+
+@fig-xy_qq reveals that while the centres of both distributions are similar (roughly following the red reference line), there are substantial deviations in the tails. Specifically, an S-shaped pattern is observed with noticeable "plateaus" at the extremes ($Y$ quantiles increasing slower than $X$ quantiles), suggesting $Y$ has a heavier tail and extreme cases occur more consistently. However, $X$ quantiles span a wider range, indicating higher extremes. The consistency of extreme $Y$ values may suggest measurement validity issues.
+
+Since $Y$ relies on survey data, concerns about measurement are reasonable. Specifically, the consistency of extreme cases can stem from **non-random selection** of survey respondents. While all survey sources used by @eap are reputable (e.g. Gallup World Poll, Eurobarometer), they utilize voluntary surveys that naturally invite biases. Some biases include voluntary response bias, where individuals with stronger opinions respond more often (leading to extreme cases), and non-response bias, where individuals not responding—often with different beliefs—lack representation in the sample.
+
+Despite these prevalent biases, @eap draw from a wide range of survey sources, offering a larger sample and reducing sampling variability, which helps to mitigate these biases. Winsorization could be a solution to further reduce the effects of biases from $Y$ and extreme outliers from $X$ by replacing extreme values with percentile values (e.g. 5th and 95th percentile) to constrain the data within a more realistic range. @fig-winsorized_xy_qq shows how @fig-xy_qq is altered after a 90% winsorization on $X$ and $Y$,
+
+```{r}
+#| label: fig-winsorized_xy_qq
+#| fig-width: 6
+#| fig-height: 6
+#| fig-cap: "Q-Q plot of `gdp_pc_growth` and `approval_smoothed` z-scores after 90% winsorization. Axes limits are set to (-2.5, 2.5) with no data points beyond the limit"
+
+# Winsorize the data (90% winsorization)
+
+winsorized_xy <- final_dataset |>
+  mutate(approval_smoothed_winsor =
+           Winsorize(approval_smoothed,val=quantile(approval_smoothed,
+                                                         probs = c(0.05, 0.95),
+                                                         na.rm=TRUE)),
+         gdp_pc_growth_winsor=
+           Winsorize(gdp_pc_growth,val=quantile(gdp_pc_growth,
+                                                         probs = c(0.05, 0.95),
+                                                         na.rm=TRUE))
+         )
+
+# Standardize the winsorized data
+
+winsorized_standardized <- winsorized_xy |>
+  mutate(
+    gdp_pc_growth_winsor_z=(
+    gdp_pc_growth_winsor-mean(gdp_pc_growth_winsor,na.rm=TRUE))/sd(gdp_pc_growth_winsor,na.rm=TRUE),
+    approval_winsor_z=(
+    approval_smoothed_winsor-mean(approval_smoothed_winsor,na.rm=TRUE))/sd(approval_smoothed_winsor, na.rm=TRUE)
+  )|>
+  select(gdp_pc_growth_winsor_z,approval_winsor_z)
+
+# Q-Q Plot with x and y limit set to (-2.5,2.5)
+
+par(pty = "s")
+
+qqplot(
+       winsorized_standardized$gdp_pc_growth_winsor_z, winsorized_standardized$approval_winsor_z,
+       xlab = "% change of PPP GDP per capita \nfrom previous year z-score after 90% winsorization",
+       ylab = "Approval of national government \nz-score after 90% winsorization",
+       pch = 21,
+         col = "black",
+         bg  = "gray90",
+         lwd = 1,
+       asp = 1,
+       xlim = c(-2.5, 2.5), # Setting x-axis limits
+       ylim = c(-2.5, 2.5)  # Setting y-axis limits
+)
+
+abline(0, 1, col = "red", lty = 2, lwd = 1.5)
+```
+
+effectively "trimming" the tails that initially produced the S pattern and emphasizing the middle quantiles following the reference line instead. Although winsorization can reduce the impact of outliers, it suffers from a trade-off of omitting potentially meaningful outliers for simplicity.
+
+```{r}
+#| label: fig-xy_line_plot
+#| fig-width: 9
+#| fig-height: 5
+#| fig-cap: "Line plot for z-scores of mean `gdp_pc_growth` and `approval_smoothed` for all countries across time. Standardization ensures variables are on comparable scales and fluctuations in values can be easily observed"
+
+# Calculate z-scores for mean gdp_pc_growth and approval_smoothed
+
+mean_xy_zscore<-final_dataset|>
+  group_by(year)|>
+  summarize(
+    `Mean % change of PPP GDP per capita from previous year`=mean(gdp_pc_growth,na.rm=TRUE),
+    `Mean approval of national government`=mean(approval_smoothed,na.rm=TRUE))|>
+  mutate_at(c(
+    "Mean % change of PPP GDP per capita from previous year",
+    "Mean approval of national government"),
+    ~(scale(.) %>% as.vector))|>
+  pivot_longer(
+    cols=`Mean % change of PPP GDP per capita from previous year`:`Mean approval of national government`,
+    names_to="variable",values_to="value")
+
+# Line plot for z-scores of mean gdp_pc_growth and approval_smoothed
+
+xy_line_plot<-mean_xy_zscore|>
+  ggplot(aes(x=year,y=value,color=variable,linetype=variable))+
+  geom_line()+
+  scale_color_manual(values=c(
+    "Mean % change of PPP GDP per capita from previous year"="black",
+    "Mean approval of national government"="red")
+    )+
+  scale_linetype_manual(values=c(
+    "Mean % change of PPP GDP per capita from previous year"="solid",
+    "Mean approval of national government"="dashed")
+    )+
+  labs(x="Year",y="Z-score",color="Variable",linetype="Variable")+
+  theme_minimal()+
+  theme(legend.position=c(0.51, 0.15))
+
+xy_line_plot
+
+```
+
+@fig-xy_line_plot indicates that $X$ and $Y$ fluctuate over time, with extreme shifts accurately reflecting major global events (e.g. COVID). $Y$ appears to follow the trend of $X$ but with a lag of \~3-4 years. The observed lag may arise from irregular survey administration frequencies creating temporal gaps between shocks to $X$ and recording of $Y$, distorting the immediate effects between the variables. Delays in economic shocks impacting public perception may also contribute to the lag: while $X$ can easily quantify immediate economic changes, $Y$ operates in different scales as respondents vary in their tolerance and optimism for the government, often leading to a delayed change in their attitude as they observe how their government handles economic shocks.
+
+The lagged relationship will be explored in stage 6 by accounting for lagged $X$ values by intervals of years ($t$) when running regression models (e.g. distributed lag and autoregressive models).
+
+```{r}
+#| label: fig-xy_line_lagged
+#| fig-width: 11
+#| fig-height: 5
+#| fig-cap: "Line plots for z-scores of mean `gdp_pc_growth` and `approval_smoothed` for all countries across time. Plots are separated by lagged variants of `gdp_pc_growth`"
+
+# Generate lagged GDP per capita growth variables for 1 to 6 years
+
+final_dataset_lag <- final_dataset
+for (i in 1:6) {
+  final_dataset_lag <- final_dataset_lag |>
+    group_by(country_code) |>
+    mutate(!!paste0("gdp_pc_growth_lag", i) := lag(gdp_pc_growth, n = i)) |>
+    ungroup()
+}
+
+# Reshape data for plotting
+
+mean_xy_zscore_lag <- bind_rows(
+  lapply(1:6, function(i) {
+    final_dataset_lag |>
+      group_by(year) |>
+      summarize(
+        gdp_pc_growth_mean = mean(get(paste0("gdp_pc_growth_lag", i)), na.rm = TRUE),
+        approval_mean = mean(approval_smoothed, na.rm = TRUE)
+      ) |>
+      mutate_at(c("gdp_pc_growth_mean", "approval_mean"), 
+                ~(scale(.) %>% as.vector)) |>
+      pivot_longer(
+        cols = c(gdp_pc_growth_mean, approval_mean),
+        names_to = "variable", values_to = "value"
+      ) |>
+      mutate(
+        variable = recode(variable,
+          "gdp_pc_growth_mean" = "Mean % change of PPP GDP per capita\nfrom previous year (independent variable)",
+          "approval_mean" = "Mean approval of national\ngovernment (dependent variable)"
+        ),
+        lag = paste0("Independent variable lagged by ", i, " year(s)")
+      )
+  })
+)
+
+# Line plot for z-scores of mean gdp_pc_growth and approval_smoothed with facets for lagged variables
+
+xy_line_plot_lag <- mean_xy_zscore_lag |>
+  ggplot(aes(x = year, y = value, color = variable, linetype = variable)) +
+  geom_line(size = 0.35) +
+  scale_color_manual(values = c(
+    "Mean % change of PPP GDP per capita\nfrom previous year (independent variable)" = "black",
+    "Mean approval of national\ngovernment (dependent variable)" = "red"
+  )) +
+  scale_linetype_manual(values = c(
+    "Mean % change of PPP GDP per capita\nfrom previous year (independent variable)" = "solid",
+    "Mean approval of national\ngovernment (dependent variable)" = "dashed"
+  )) +
+  labs(x = "Year", y = "Z-score", color = "Variable", linetype = "Variable") +
+  facet_wrap(~lag, ncol = 3) +
+  theme_minimal() +
+  theme(legend.position = "bottom", legend.direction = "horizontal")
+
+xy_line_plot_lag
+
+```
+
+@fig-xy_line_lagged indicates $X_{t-1}$, $X_{t-2}$, $X_{t-3}$, and $X_{t-4}$ all better overlap with $Y_t$ than $X_t$, indicating they may better explain $Y_t$ and should be explored further as independent variables when running regressions.
+
+# Conclusion
+
+While current evidence suggests a weak but evident correlation between $X$ and $Y$, accounting for non-linearity and controlling for confounds may reveal stronger relationships. However, it is vital to first address underlying issues with $Y$—such as lag and non-random sampling biases—to ensure the analysis avoids the perils of “garbage in, garbage out".
