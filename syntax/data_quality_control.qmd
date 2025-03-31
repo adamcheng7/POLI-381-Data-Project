@@ -8,7 +8,7 @@ format:
       theme: cosmo
       fontsize: 14px
       page-layout: article
-      html-math-method: mathjax
+      html-math-method: mathml
       grid:
         sidebar-width: 250px
         body-width: 950px
@@ -153,7 +153,7 @@ diagnosis_table <- function(data, variables){
         `Unique Values` = n_distinct(., na.rm=TRUE),
         `Total Values` = sum(!is.na(.)),
         `Missing Values` = sum(is.na(.)),
-        `Missing Proportion` = mean(is.na(.))*100,
+        `Missing Proportion` = round(mean(is.na(.)) * 100, 2),
         `Outliers Count` = outlier_count,
         `Zero Count` = sum(. == 0, na.rm=TRUE)
       )
@@ -176,7 +176,8 @@ quantitative_summary <- function(data, variables) {
       `75th Percentile` = quantile(., 0.75, na.rm = TRUE),
       `95th Percentile` = quantile(., 0.95, na.rm = TRUE),
       `Maximum` = max(., na.rm = TRUE)
-    ), .id = "Variable")
+    ) |>
+    mutate(across(where(is.numeric), ~ round(., 2))), .id = "Variable")
 }
 
 ## Kernel Density Estimation Plots Function
