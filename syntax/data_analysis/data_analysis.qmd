@@ -1,0 +1,514 @@
+---
+title: "POLI 381 Data Project – Data Analysis"
+author: "Adam Cheng"
+bibliography: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/syntax/data_analysis/bibliography/data_analysis_citations.bib
+csl: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/syntax/data_analysis/bibliography/apa_6th_edition.csl
+format:
+  pdf:
+    pdf-engine: xelatex
+    documentclass: scrartcl
+    include-in-header:
+      - text: |
+          \usepackage{caption}
+          \usepackage{subcaption}
+          \captionsetup[table]{skip=11pt} % vertical spacing between table and caption
+          \captionsetup[subtable]{skip=11pt} % vertical spacing between subtable and caption
+          \captionsetup[figure]{skip=11pt} % vertical spacing between figure and caption
+          \captionsetup[subfigure]{skip=11pt} % vertical spacing between subfigure and caption
+          \captionsetup{font=small,labelfont=bf} % font size and style for captions
+          \captionsetup[table]{justification=centering} % center table captions
+          \captionsetup[figure]{justification=centering} % center figure captions
+    df-print: kable
+    fig-pos: "H"
+    linestretch: 1.5
+    fontsize: 11.5pt
+    mainfont: "NewComputerModern08"
+    sansfont: "NewComputerModern10"
+    monofont: "NewComputerModernMono10"
+    mathfont: "NewComputerModernMath"
+    reference-section-title: "References"
+    toc: false
+    number-sections: true
+  html:
+      theme: cosmo
+      fontsize: 14px
+      page-layout: article
+      html-math-method: mathml
+      grid:
+        sidebar-width: 250px
+        body-width: 950px
+        margin-width: 250px
+        gutter-width: 1.5rem
+      code-links:
+      - text: Project Repository
+        icon: github
+        href: https://github.com/adamcheng7/POLI-381-Data-Project
+      number-sections: true
+      toc: true
+      toc-expand: true
+      toc-location: left
+      df-print: kable
+      code-fold: true
+      self-contained: true
+format-links: false
+other-links:
+  - text: PDF Version
+    href: https://nbviewer.org/github/adamcheng7/POLI-381-Data-Project/blob/bdacf660633dfa213f2021a2f41f139376051dc1/syntax/data_analysis/data_analysis.pdf
+    icon: file-pdf
+execute:
+  echo: false
+  warning: false
+  message: false
+editor: visual
+---
+
+```{r}
+#| label: loading_packages
+#| output: false
+
+# List of necessary packages
+packages <- c("rlang",
+              "tidyverse",
+              "repr",
+              "janitor",
+              "haven",
+              "GGally",
+              "DescTools"
+              )
+
+# Install packages that are not installed
+new_packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new_packages) > 0) install.packages(new_packages)
+
+# Loading the necessary R packages
+library(rlang)
+library(tidyverse)
+library(repr)
+library(janitor)
+library(haven)
+library(GGally)
+library(DescTools)
+
+# Setting seed for reproducibility
+set.seed(2025)
+
+# Disabling scientific notations
+options(scipen = 999)
+```
+
+```{r}
+#| label: loading_datasets
+#| output: false
+
+data_set_url<-"https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/data/complete_dataset.csv"
+
+final_dataset<-read_csv(data_set_url)|>
+  mutate(country_name=as_factor(country_name),
+         country_code=as_factor(country_code))
+
+head(final_dataset|>filter(country_code=="USA"))
+```
+
+# Introduction
+
+In this project, the goal is to address how economic performance (denoted $X$) influences public approval of national governments (denoted $Y$) over time. This research topic is important because findings can offer valuable insights to governments about the impact economic factors have on their survival, helping to develop more effective strategies that can generate mutually beneficial effects where governments prolong their lifespan (assuming that is their goal) and citizens enjoy stable governments.
+
+My model expects that the relationship between $X$ and $Y$ is positive (or negative for countercyclical variables like unemployment rate) with more complex characteristics than a simple linear relationship, such as:
+
+1.  **Non-linearity**: Like the law of marginal diminishing returns, the relationship between $X$ and $Y$ should be initially positive until reaching a plateau point, where further economic growth produces diminishing returns on government approval as individuals substitute to other concerns responsible by the government.
+
+2.  **The strength of correlation between** $X$ **and** $Y$ (denoted by Spearman’s ρ, discussed in detail later) should be dependent on countries’:
+
+    -   **GDP per capita level**: The wealthier the country, the weaker the ρ because fluctuations in economic performance would be less impactful to them.
+    -   **Economic stability through time**: The more stable the economy is across time, the weaker the ρ because there are minimal fluctuations (i.e. essentially constant), meaning changes in $Y$ are likely influenced by other factors.
+
+Although there are certainly more confounders to control, only two will be discussed due to the project’s scope and limited word count.
+
+# Data and Measurement
+
+## Variables and Theoretical Conjecture
+
+The coverage of the dataset is extensive, with 110 countries between 1990-2023. Therefore, to reduce noise, the variables will be carefully structured to examine the correlation between $X$ and $Y$ as follows:
+
+**Independent variables (measures** $X$**)**:
+
+1.  **`gdp_pc_growth`**: % change of `gdp_pc` from the previous year.
+2.  **`unemployment_rate`**: Unemployment rate (% of labor force).
+    -   Source: @imf.
+3.  **`cpi_growth`**: % change of Consumer Price Index from the previous year.
+    -   Source: @imf.
+
+..., where implementing numerous independent variables can better capture multiple dimensions of $X$ and determine the dimension most impactful on $Y$.
+
+**Dependent variable (measures** $Y$**)**:
+
+1.  **`approval_smoothed`**: Approval rating of national government smoothed via exponential smoothing (% of survey respondents).
+    -   Source: @eap.
+
+All variables are measured annually and nationally, and transformations of these variables only occur in the visualizations and tables of this paper, which will be discussed in detail when presented.
+
+**Control variables (compares differences in ρ)**:
+
+1.  **`year`**: Calendar year, controlled by reducing the range to 2004-2013, setting 2008 as a cutoff point, and producing two strata (2004-2007 & 2008-2013).
+2.  **`gdp_pc`**: GDP per capita in 2021 PPP USD, controlled by classifying countries based on tertiles of its 2004 values (i.e. bottom, middle, and top 33% of the data).
+    -   Source: @wb.
+
+ρ will be calculated and visualized separately by `year` and `gdp_pc` strata to compare values between times of relative economic stability (2004-2007) and economic instability (2008-2013: global financial crisis) and three ordinal income levels of countries at a fixed year respectively.
+
+```{r}
+#| label: building_analysis_dataset
+#| output: false
+
+# Create gdp_pc_tertile_2004 based on 2004 GDP per capita
+gdp_pc_2004 <- final_dataset |>
+  filter(year == 2004) |>
+  select(country_name, gdp_pc) |>
+  filter(!is.na(gdp_pc))
+
+# Compute tertile thresholds
+gdp_pc_tertiles <- quantile(gdp_pc_2004$gdp_pc, probs = c(1/3, 2/3), na.rm = TRUE)
+
+# Create the tertile classification
+gdp_pc_2004 <- gdp_pc_2004 |>
+  mutate(
+    gdp_pc_tertile_2004 = cut(
+      gdp_pc,
+      breaks = c(-Inf, gdp_pc_tertiles, Inf),
+      labels = c(
+        "Bottom 33% of GDP per Capita in 2004",
+        "Middle 33% of GDP per Capita in 2004",
+        "Top 33% of GDP per Capita in 2004"
+      ),
+      include.lowest = TRUE
+    )
+  )
+
+# Creating analysis dataset with tertiles
+analysis_dataset <- final_dataset |>
+  group_by(country_name) |>
+  arrange(year, .by_group = TRUE) |>
+  ungroup() |>
+  left_join(gdp_pc_2004 |> select(country_name, gdp_pc_tertile_2004), by = "country_name") |>
+  filter(!is.na(gdp_pc_tertile_2004)) |> # Only 1 observation, Kosovo, is dropped
+  filter(year >= 2004 & year <= 2013)
+
+# Pivoting analysis dataset
+analysis_dataset_pivot <- analysis_dataset |>
+  pivot_longer(
+    cols = approval_smoothed:cpi_growth,
+    names_to = "variable",
+    values_to = "value"
+  )
+```
+
+## Examining Variation
+
+Before assessing correlations, it is vital to verify if control variables `gdp_pc` and `year` exhibit the necessary variation for a meaningful analysis.
+
+@fig-gdp_pc_2004_tertiles_distribution uses kernel density estimation and rug plots to examine the distribution of 2004 `gdp_pc` values stratified by their tertiles. The x-axis and its tick marks indicate 2004 `gdp_pc` values and the y-axis indicates the proportion of total data shared.
+
+```{r}
+#| label: fig-gdp_pc_2004_tertiles_distribution
+#| fig-width: 7
+#| fig-height: 5
+#| layout: "[[1,-0.15,1],[-0.2],[-0.5,1,-0.5]]"
+#| fig-cap: "Kernel density estimation (KDE) plots for `gdp_pc` values in 2004 separated by their tertiles"
+#| fig-subcap:
+#|  - "KDE plot for the bottom 33% of `gdp_pc` values in 2004 (bandwidth = 650)"
+#|  - "KDE plot for the middle 33% of `gdp_pc` values in 2004 (bandwidth = 1100)"
+#|  - "KDE plot for the top 33% of `gdp_pc` values in 2004 (bandwidth = 7000)"
+
+# Bottom 33% KDE plot
+gdp_pc_1_kde <- gdp_pc_2004 |>
+  filter(gdp_pc_tertile_2004 == "Bottom 33% of GDP per Capita in 2004") |>
+  ggplot(aes(x = gdp_pc)) +
+  geom_density(kernel = "gaussian", alpha = 0.5, bw=650) +
+  geom_rug() +
+  labs(
+    x = "GDP per Capita in 2021 PPP USD (2004)",
+    y = "Density"
+  ) +
+  scale_x_continuous(labels = scales::comma,
+                     breaks=scales::breaks_extended(n=10)) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10))
+  )
+
+# Middle 33% KDE plot
+gdp_pc_2_kde <- gdp_pc_2004 |>
+  filter(gdp_pc_tertile_2004 == "Middle 33% of GDP per Capita in 2004") |>
+  ggplot(aes(x = gdp_pc)) +
+  geom_density(kernel = "gaussian", alpha = 0.5, bw=1100) +
+  geom_rug() +
+  labs(
+    x = "GDP per Capita in 2021 PPP USD (2004)",
+    y = "Density"
+  ) +
+  scale_x_continuous(labels = scales::comma,
+                     breaks=scales::breaks_extended(n=10)) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10))
+  )
+
+# Top 33% KDE plot
+gdp_pc_3_kde <- gdp_pc_2004 |>
+  filter(gdp_pc_tertile_2004 == "Top 33% of GDP per Capita in 2004") |>
+  ggplot(aes(x = gdp_pc)) +
+  geom_density(kernel = "gaussian", alpha = 0.5, bw=7000) +
+  geom_rug() +
+  labs(
+    x = "GDP per Capita in 2021 PPP USD (2004)",
+    y = "Density"
+  ) +
+  scale_x_continuous(labels = scales::comma,
+                     breaks=scales::breaks_extended(n=10)) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10))
+  )
+
+gdp_pc_1_kde
+gdp_pc_2_kde
+gdp_pc_3_kde
+```
+
+Each subplot of @fig-gdp_pc_2004_tertiles_distribution indicates each stratum sufficiently isolated a reasonable range of `gdp_pc` between levels while providing a balanced number of observations, adequate variation, and no redundancy in values between each stratum. These characteristics suggest `gdp_pc` and its 2004 base year can meaningfully contribute to the analysis.
+
+@fig-variable_trends_across_time utilizes line plots to illustrate the variation of variables across time and `gdp_pc` levels, highlighting differences in economic stability before and after the 2008 cutoff point and trends that may suggest potential correlations. Since variables are measured by country and year, and the `gdp_pc` strata contain multiple countries, each variable is transformed to its mean value by its corresponding strata each year, plotting one simple but intuitive line within each facet.
+
+```{r}
+#| label: fig-variable_trends_across_time
+#| fig-width: 9
+#| fig-height: 6
+#| fig-cap: "Line plots for mean values of variables (y-axis) for countries between 2004-2013 (x-axis) grouped by variable (row) and tertiles of 2004 `gdp_pc` values (column). The vertical blue line indicates the 2008 financial crisis cutoff point"
+
+# Defining tertile labels for facet columns
+gdp_pc_2004_tertile_labels <- c(
+  "Bottom 33% of GDP per Capita in 2004" = "Bottom 33% of GDP per Capita (2004)",
+  "Middle 33% of GDP per Capita in 2004" = "Middle 33% of GDP per Capita (2004)",
+  "Top 33% of GDP per Capita in 2004" = "Top 33% of GDP per Capita (2004)"
+)
+
+# Defining variable labels for face rows
+
+variable_labels <- c(
+  "approval_smoothed" = "Government\nApproval (%)",
+  "cpi_growth" = "CPI\nGrowth (%)",
+  "gdp_pc_growth" = "GDP Per Capita\nGrowth (%)",
+  "unemployment_rate" = "Unemployment \nRate (%)"
+)
+
+# Plotting variable trends across time and gdp_pc levels
+variable_trends_across_time <- analysis_dataset_pivot |>
+  group_by(gdp_pc_tertile_2004, year, variable) |>
+  summarize(mean = mean(value, na.rm = TRUE), .groups = "drop") |>
+  mutate(
+    gdp_pc_tertile_2004 = recode(gdp_pc_tertile_2004, !!!gdp_pc_2004_tertile_labels),
+    variable = recode(variable, !!!variable_labels)
+  ) |>
+  filter(variable %in% variable_labels) |>
+  ggplot(aes(x = year, y = mean)) +
+  geom_line(color = "black", linewidth = 0.5) +
+  geom_point(color = "black", alpha = 0.5, size = 0.65) +
+  facet_grid(
+    rows = vars(variable),
+    cols = vars(gdp_pc_tertile_2004),
+    scales = "free_y"
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Year by GDP per Capita (2004) Tertiles",
+    y = "Mean Value by Variable"
+  ) +
+  geom_vline(xintercept = 2008,
+             linetype = "dashed",
+             color = "#3e83b8",
+             linewidth = 0.3) +
+  theme(
+    legend.position = "none",
+    strip.background = element_blank(),
+    strip.text.y = element_text(size = 8,angle=0),
+    strip.text.x = element_text(size = 9),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.title.x = element_text(margin = margin(t = 10))
+  )
+
+# Print plot
+variable_trends_across_time
+```
+
+By comparing fluctuations of independent variables before and after the cutoff point for each subplot, it is evident that 2008 is a strong separator that can control for periods of economic stability and instability. However, it is difficult to ignore the lack of fluctuations in `approval_smoothed` before or after 2008, suggesting the correlation between $X$ and $Y$ may be weak. Overall, the plot indicates trends between `approval_smoothed` and `unemployment_rate` appear the most correlated. Furthermore, it is vital to note that variables are transformed and do not visualize the true correlation until scatterplots or ρ values are produced. The goal of these figures is to show that both control variables can meaningfully contribute to the analysis.
+
+# Descriptive Analysis
+
+To first address my research question, Spearman’s rank correlation coefficients (ρ) are computed in @tbl-correlation separately for each control and independent variable to compare changes in correlation (denoted Δρ) and determine which variable has the strongest correlation with `approval_smoothed` respectively. Given the context of the research question, ρ is chosen as the correlation metric because it is non-parametric and rank-based, meaning ρ does not assume variables are normally distributed (beneficial to my right-skewed economic variables) and is more suited to capture the assumed non-linear monotonic relationship between $X$ and $Y$.
+
+```{r}
+#| label: tbl-correlation
+#| tbl-cap: "Differences in Spearman's rank correlation coefficeint (ρ) separated by independent variables, cutoff point (2008 financial crisis), and tertiles of 2004 `gdp_pc` values. ρ ranges from -1 to 1, where values near 1 or -1 indicate a strong positive or negative relationship, and values near 0 suggest little to no association"
+#| tbl-subcap:
+#| - "ρ for gdp_pc_growth and approval_smoothed"
+#| - "ρ for unemployment_rate and approval_smoothed"
+#| - "ρ for cpi_growth and approval_smoothed"
+#| layout: "[[1],[1],[1]]"
+#| tbl-pos: H
+
+# Creating function for Spearman's rank correlation coefficient table
+
+cor_comparison_by_period <- function(data, x, y) {
+  x <- ensym(x)
+  y <- ensym(y)
+
+  # Helper for pre and post period by group
+  compute_corr <- function(period_label, year_filter) {
+    data |>
+      filter(
+        !is.na(!!x),
+        !is.na(!!y),
+        !!year_filter
+      ) |>
+      group_by(gdp_pc_tertile_2004) |>
+      summarise(
+        spearman_corr = round(cor(!!x, !!y, method = "spearman"), 2),
+        .groups = "drop"
+      ) |>
+      rename_with(~ paste0("spearman_rho_", period_label), "spearman_corr")
+  }
+
+  # Helper for overall (non-grouped) correlation
+  compute_total_corr <- function(period_label, year_filter) {
+    data |>
+      filter(
+        !is.na(!!x),
+        !is.na(!!y),
+        !!year_filter
+      ) |>
+      summarise(
+        spearman_corr = round(cor(!!x, !!y, method = "spearman"), 2)
+      ) |>
+      mutate(group = "Total (Not grouped by tertiles)") |>
+      rename_with(~ paste0("spearman_rho_", period_label), "spearman_corr")
+  }
+
+  # Compute grouped correlations
+  cor_pre <- compute_corr("pre_2008", quote(year < 2008))
+  cor_post <- compute_corr("post_2008", quote(year >= 2008))
+
+  # Combine grouped results
+  grouped_result <- cor_pre |>
+    inner_join(cor_post, by = "gdp_pc_tertile_2004") |>
+    mutate(
+      difference = spearman_rho_post_2008 - spearman_rho_pre_2008,
+      gdp_pc_tertile_2004 = recode(gdp_pc_tertile_2004,
+        "Bottom 33% of GDP per Capita in 2004" = "Bottom 33%",
+        "Middle 33% of GDP per Capita in 2004" = "Middle 33%",
+        "Top 33% of GDP per Capita in 2004" = "Top 33%"
+      )
+    ) |>
+    rename(`GDP Per Capita Tertile (2004)` = gdp_pc_tertile_2004)
+
+  # Compute total (non-grouped) correlations
+  total_pre <- compute_total_corr("pre_2008", quote(year < 2008))
+  total_post <- compute_total_corr("post_2008", quote(year >= 2008))
+
+  # Combine total results
+  total_result <- total_pre |>
+    inner_join(total_post, by = "group") |>
+    mutate(
+      difference = spearman_rho_post_2008 - spearman_rho_pre_2008
+    ) |>
+    rename(`GDP Per Capita Tertile (2004)` = group)
+
+  # Combine grouped and total
+  bind_rows(
+    grouped_result,
+    total_result
+    ) |>
+    rename(
+      `ρ (2004-2007)` = spearman_rho_pre_2008,
+      `ρ (2008-2013)` = spearman_rho_post_2008,
+      `Δρ` = difference
+    )
+}
+
+# Assigning objects for tables
+gdp_pc_growth_correlation <- analysis_dataset |>
+  cor_comparison_by_period(gdp_pc_growth, approval_smoothed)
+
+unemployment_correlation <- analysis_dataset |>
+  cor_comparison_by_period(unemployment_rate, approval_smoothed)
+
+cpi_correlation <- analysis_dataset |>
+  cor_comparison_by_period(cpi_growth, approval_smoothed)
+
+gdp_pc_growth_correlation
+
+unemployment_correlation
+
+cpi_correlation
+```
+
+By examining the effects of independent variables, it is evident that `unemployment_rate` has the strongest correlation with `approval_smoothed`. However, all ρ values suggest a weak to moderate relationship between $X$ and $Y$, meaning findings do not strongly support my theoretical conjecture. Furthermore, ρ values with `cpi_growth` as the independent variable are too weak to generate conclusive findings. However, differences in ρ between control variables offer some crucial insights.
+
+When comparing differences in ρ before and after 2008, the relationship between $X$ and $Y$ overall strengthened (i.e., Δρ noticeably increased/decreased), suggesting ρ is likely dependent on economic stability. However, differences in ρ between `gdp_pc` levels are not as conclusive because they vary between all independent and control variables with no evident but still, non-random patterns, suggesting further conditioning before concluding ρ is independent of `gdp_pc` levels.
+
+Since `unemployment_rate` exhibits the strongest monotonic correlation with `approval_smoothed` post-2008, a LOESS regression plot is produced given those conditions to visualize the correlation.
+
+```{r}
+#| label: fig-unemployment_loess
+#| fig-width: 8
+#| fig-height: 5
+#| fig-cap: "LOESS regression for `unemployment_rate` and `approval_smoothed` values between 2008-2013 separated by tertiles of 2004 `gdp_pc` values (bandwidth = 0.7)"
+
+# Creating the dataset with gdp_pc levels facet for LOESS
+loess_facet_tertiles <- analysis_dataset |>
+  filter(year >= 2008) |>
+  mutate(facet_group = gdp_pc_tertile_2004)
+
+# Creating the overall dataset with "all countries" facet for LOESS
+loess_facet_all_countries <- analysis_dataset |>
+  filter(year >= 2008) |>
+  mutate(facet_group = "All countries")
+
+# Combining both facet datasets
+loess_all_facet_groups <- bind_rows(loess_facet_tertiles, loess_facet_all_countries)
+
+# LOESS regression with facet
+unemployment_loess<-ggplot(loess_all_facet_groups,
+                             aes(x = unemployment_rate,
+                                 y = approval_smoothed)) +
+  geom_point(shape = 21, fill = "white", color = "black", alpha = 0.5) +
+  geom_smooth(method = "loess", se = TRUE, color = "blue", span=0.7,size=0.8) +
+  facet_wrap(vars(facet_group), nrow = 2, ncol = 2) +
+  labs(
+    x = "Unemployment Rate (%)",
+    y = "Approval of National Government (%)"
+  ) +
+  theme_minimal()+
+  theme(
+    axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10))
+  )
+
+unemployment_loess
+```
+
+As shown by @fig-unemployment_loess, the LOESS regression captures the expected moderate and negative relationship from @tbl-correlation-2, with the top 33% `gdp_pc` level displaying the most consistent pattern. Although the plot shows signs of a plateau point at `unemployment_rate` values lower than \~8%, the data is too noisy for the evidence to be conclusive.
+
+In conclusion, @tbl-correlation and @fig-unemployment_loess suggest current data is still noisy and lacks strong evidence to support the argument and assumptions, demanding further data conditioning.
+
+# Interpretation and Conclusion
+
+From all the findings, it is evident that the model requires improvement but still produced insights that were consistent with my expectations, such as `unemployment_rate` exhibiting the strongest correlation with `approval_smoothed` amongst the other two independent variables, which is reasonable considering unemployment effects are likely the most damaging and immediate to individuals’ livelihood. Though the correlation strength between $X$ and $Y$ is likely dependent on countries’ economic stability across time, it remains inconclusive for `gdp_pc` levels. Lastly, the relationship between $X$ and $Y$ seems non-linear and exhibits plateaus, but with more complexity as results vary often depending on the control and independent variables used.
+
+Ultimately, the unavoidable caveats to this analysis reside in the size of the dataset, meaning there are countless variables to consider and condition for. Therefore, for future reference, improvements to the model can be made in numerous ways:
+
+-   **Reducing scope**: Concentrating on countries similar in many categories to reduce variation from unobserved variables.
+-   **Improving precision**: Shortening the time gap between observations can increase precision as annual gaps may be too large to fully capture public opinion, considering they are often very elastic and suffer from recency bias.
+-   **More variables**: Adding more relevant control, independent, and dependent variables can improve consistency in results.
