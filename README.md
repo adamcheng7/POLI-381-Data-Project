@@ -13,7 +13,7 @@ The variables include:
 
 - `country_code`: ISO 3166-1 alpha-3 code of the country
 
-- `year`: Year of the observation
+- `year`: Calendar year
 
 - `gdp_pc`: GDP per capita in 2021 PPP USD ($)
 
@@ -44,11 +44,20 @@ The data is sourced from the following:
 
     - `data_quality_control.qmd`: Quarto Markdown file in R code for data quality control
 
-- `bibliography`: Contains the bibliography files used for citations
+    - `data_analysis.qmd`: Quarto Markdown file in R code for data analysis
 
-    - `*.bib`: BibTeX file containing references for documents
+- `syntax`-specific files: 
+    - `bibliography`: Contains the bibliography files used for citations
 
-    - `citation_styles/*.csl`: Citation Style Language files used for formatting references
+        - `*.bib`: BibTeX file containing references for documents
+
+        - `*.csl`: Citation Style Language files used for formatting references
+
+    - `tex`: Contains the LaTeX files used for generating publication-ready documents
+
+        - `*.tex`: LaTeX files containing the code for generating publication-ready documents
+
+        - `*.cls`: LaTeX class files used for formatting the documents
 
 
 ## Software Requirements
@@ -60,18 +69,21 @@ The data is sourced from the following:
     - [RStudio](https://posit.co/downloads/) is recommended as it provides a user-friendly interface for R programming and data analysis
 
 ## Running the Code
-- To run the code for `data_quality_control.qmd`:
+**To run code for the `*.qmd` files**:
 
-    - Install [Quarto](https://quarto.org/docs/get-started/)
+- Install [Quarto](https://quarto.org/docs/get-started/)
 
-    - Open the `.qmd` file in RStudio or any [code editor supported by Quarto](https://quarto.org/docs/get-started/hello/vscode.html)
+- Ensure the appropriate programming language is installed (e.g., R, Python)
 
-    - Run the code from top to bottom
+- Open the `*.qmd` file in RStudio or any [code editor supported by Quarto](https://quarto.org/docs/get-started/hello/vscode.html)
 
-    - To generate publication ready files:
-        - Click on the "Render" button in RStudio or use the command line to render the file
+- Run the code from top to bottom
 
-        - The output will be saved in the same directory as the `.qmd` file unless specified otherwise
+- **Note**: To generate publication ready files
+    - Click on the "Render" button in RStudio or use the command line to render the file
+
+    - The output will be saved in the same directory as the `*.qmd` file unless specified otherwise
+
 ## References
 Carlin, R. E., Hartlyn, J., Hellwig, T., Love, G. J., Martı́nez-Gallardo, C., Singer, M. M.,..Sert, H. (2023). *Executive Approval Database 3.0*. \[Annual and National Dataset\]. Retrieved from https://executiveapproval.org/
 
