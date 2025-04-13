@@ -53,7 +53,7 @@ format:
 format-links: false
 other-links:
   - text: PDF Version
-    href: https://nbviewer.org/github/adamcheng7/POLI-381-Data-Project/blob/bdacf660633dfa213f2021a2f41f139376051dc1/syntax/data_analysis/data_analysis.pdf
+    href: https://github.com/adamcheng7/POLI-381-Data-Project/blob/main/syntax/data_analysis/data_analysis.pdf
     icon: file-pdf
 execute:
   echo: false
@@ -505,7 +505,7 @@ In conclusion, @tbl-correlation and @fig-unemployment_loess suggest current data
 
 # Interpretation and Conclusion
 
-From all the findings, it is evident that the model requires improvement but still produced insights that were consistent with my expectations, such as `unemployment_rate` exhibiting the strongest correlation with `approval_smoothed` amongst the other two independent variables, which is reasonable considering unemployment effects are likely the most damaging and immediate to individuals’ livelihood. Though the correlation strength between $X$ and $Y$ is likely dependent on countries’ economic stability across time, it remains inconclusive for `gdp_pc` levels. Lastly, the relationship between $X$ and $Y$ seems non-linear and exhibits plateaus, but with more complexity as results vary often depending on the control and independent variables used.
+From all the findings, it is evident that the model requires improvement but still produced insights that were consistent with my expectations, such as `unemployment_rate` exhibiting the strongest correlation with `approval_smoothed` amongst the other two independent variables, which is reasonable considering unemployment effects are likely the most damaging and immediate to individuals’ livelihood. Though evidence does suggest that economic performance moderately influences public approval of national governments over time and the correlation strength is likely dependent on countries’ economic stability across time, it remains inconclusive for `gdp_pc` levels. Lastly, the relationship between $X$ and $Y$ seems non-linear and exhibits plateaus, but with more complexity as results vary often depending on the control and independent variables used.
 
 Ultimately, the unavoidable caveats to this analysis reside in the size of the dataset, meaning there are countless variables to consider and condition for. Therefore, for future reference, improvements to the model can be made in numerous ways:
 
