@@ -1,8 +1,8 @@
 ---
 title: "POLI 381 Data Project – Data Quality Control"
 author: "Adam Cheng"
-bibliography: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/bibliography/data_quality_control/data_quality_control_citations.bib
-csl: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/bibliography/citation_styles/apa_6th_edition.csl
+bibliography: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/syntax/data_quality_control/bibliography/data_quality_control_citations.bib
+csl: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/syntax/data_quality_control/bibliography/apa_6th_edition.csl
 format:
     html:
       theme: cosmo

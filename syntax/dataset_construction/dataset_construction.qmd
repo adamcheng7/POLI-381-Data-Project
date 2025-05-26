@@ -404,7 +404,9 @@ missingness_viz <- complete_dataset |>
     scale_color_manual(values = variable_missingness_colors) +
     scale_linetype_manual(values = variable_missingness_linetypes) +
     theme_minimal() +
-    theme(legend.position = "bottom")
+    theme(legend.position = "bottom") +
+    labs(x = "Year", y = "Proportion of Missing Data",
+         color = "Variable", linetype = "Variable")
     
 missingness_viz
 ```

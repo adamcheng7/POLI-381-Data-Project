@@ -56,6 +56,8 @@ The data is sourced from the following:
 
     - `data_analysis.qmd`: Quarto Markdown file in R code for data analysis
 
+    - `*.html and *.pdf`: Files rendered from the Quarto Markdown files. File format depends on the available output format(s) specified in the YAML of the Quarto Markdown files
+
 - `syntax`-specific files: 
     - `bibliography`: Contains the bibliography files used for citations
 
