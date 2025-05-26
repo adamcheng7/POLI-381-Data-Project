@@ -50,6 +50,8 @@ The data is sourced from the following:
 
 - `syntax`: Contains the syntax files used for data quality control and analysis
 
+    - `dataset_construction.qmd`: Quarto Markdown file in R code documenting the project dataset construction process
+
     - `data_quality_control.qmd`: Quarto Markdown file in R code for data quality control
 
     - `data_analysis.qmd`: Quarto Markdown file in R code for data analysis

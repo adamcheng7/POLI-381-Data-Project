@@ -1,0 +1,429 @@
+---
+title: "POLI 381 Data Project – Dataset Construction"
+author: "Adam Cheng"
+bibliography: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/syntax/dataset_construction/bibliography/dataset_construction_citations.bib
+csl: https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/syntax/dataset_construction/bibliography/apa_6th_edition.csl
+format:
+    html:
+      theme: cosmo
+      fontsize: 14px
+      page-layout: article
+      html-math-method: mathml
+      code-overflow: wrap
+      grid:
+        sidebar-width: 250px
+        body-width: 950px
+        margin-width: 250px
+        gutter-width: 1.5rem
+      code-links:
+      - text: Project Repository
+        icon: github
+        href: https://github.com/adamcheng7/POLI-381-Data-Project
+      number-sections: true
+      toc: true
+      toc-expand: true
+      toc-location: left
+      df-print: paged
+      code-fold: false
+      self-contained: true
+execute:
+  echo: true
+  warning: false
+  message: false
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This document provides the necessary code to fully reconstruct the dataset used for data analysis in my POLI 381 Data Project.
+
+# Loading R Packages
+
+```{r}
+#| label: loading_packages
+
+# List of necessary packages
+
+packages <- c("tidyverse", "repr", "janitor", "countrycode", "haven")
+
+# Install packages that are not installed
+
+new_packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new_packages) > 0) install.packages(new_packages)
+
+# Loading the necessary R packages
+
+library(tidyverse)
+library(repr)
+library(janitor)
+library(countrycode)
+library(haven)
+
+# Setting seed for reproducibility
+
+set.seed(2025)
+
+# Disabling scientific notations
+
+options(scipen = 999)
+```
+
+# Reading Datasets
+
+## Reading Executive Approval Project (EAP) Dataset
+
+Source: @eap
+
+```{r}
+#| label: reading_eap_data
+
+eap_data_link <- "https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/data/original_datasets/eap_data.csv"
+
+eap_data <- read_csv(eap_data_link)
+
+head(eap_data)
+```
+
+## Reading International Monetary Fund (IMF) Dataset
+
+Source: @imf
+
+```{r}
+#| label: reading_imf_data
+
+imf_data_link <- "https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/data/original_datasets/imf_data.csv"
+
+imf_data <- read_csv(imf_data_link, skip = 1)
+
+head(imf_data)
+```
+
+## Reading World Bank (WB) Dataset
+
+Source: @wb
+
+```{r}
+#| label: reading_wb_data
+
+# Empty rows at the bottom of the dataset are trimmed
+
+wb_data_link <- "https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/data/original_datasets/wb_data.csv"
+
+wb_data <- read_csv(wb_data_link) |> slice(1:217)
+
+head(wb_data)
+```
+
+# Wrangling Data
+
+## Wrangling EAP Data
+
+```{r}
+#| label: wrangling_eap_data
+
+# Assigning ISO3 standard country codes to countries and manually assigning Kosovo as "XKX" (this process is identical for all datasets and no further comment will be made)
+
+eap_with_iso3 <- eap_data |>
+  mutate(country_code = wb_code, approval_smoothed = Approval_Smoothed) |> # Renamed variable labels
+  select(country_name, country_code, year, approval_smoothed) |>
+  mutate(country_code = case_when(
+    str_detect(country_name, "Kosovo") ~ "XKX", TRUE ~
+    countrycode(country_name, origin = "country.name", destination = "iso3c")
+    ))
+
+# Converting countries with national government subset observations (e.g. France_Exec & France_PM) to one unique country-year observation for each row
+
+eap_harmonized <- eap_with_iso3 |>
+  group_by(country_code, year) |>
+  summarize(approval_smoothed = mean(approval_smoothed, na.rm = TRUE), .groups = "drop") |>
+  arrange(country_code, year) |>
+  ungroup()
+
+# Creating an approval growth rate variable to allow relative change comparisons
+
+eap_cleaned <- eap_harmonized |>
+  group_by(country_code) |>
+  mutate(approval_growth = 
+           (approval_smoothed - lag(approval_smoothed)) / lag(approval_smoothed) * 100) |>
+  ungroup()
+
+head(eap_cleaned)
+```
+
+## Wrangling IMF Data
+
+```{r}
+#| label: wrangling_imf_data
+
+# Applying pivot_longer() due to years being individual columns and pivot_wider() due to indicators being rows in a single column
+
+# Manually assigning Aruba, Curacao, and Sint Maarten to their corresponding ISO3 code due to failure to match automatically
+
+imf_cleaned <- imf_data |>
+  mutate(country = `...1`, series_name = `...2`) |>
+  select(`1920`:series_name) |>
+  pivot_longer(cols = `1920`:`2024`, names_to = "year", values_to = "value") |>
+  mutate(year = as.numeric(year)) |>
+  pivot_wider(names_from = series_name, values_from = value) |>
+    `colnames<-`(c("country_name", "year",
+                   "unemployment_rate", "unemployment_pct_change",
+                   "cpi", "cpi_growth")) |> # Renamed variable labels
+  mutate(country_code = case_when(
+    str_detect(country_name, "Kosovo") ~ "XKX",
+    str_detect(country_name, "Aruba") ~ "ABW",
+    str_detect(country_name, "Curaçao") ~ "CUW",
+    str_detect(country_name, "Sint Maarten") ~ "SXM", TRUE ~ 
+    countrycode(country_name, origin = "country.name", destination = "iso3c")
+    )) |>
+   relocate(country_code, .after = country_name) |>
+   select(-unemployment_pct_change, -cpi) # Removed variables not relevant to the project
+
+head(imf_cleaned)
+```
+
+## Wrangling WB Data
+
+```{r}
+#| label: wrangling_wb_data
+
+# Applying pivot_longer() due to years being individual columns and pivot_wider() due to indicators being rows in a single column
+
+wb_wrangled <- wb_data |>
+  clean_names() |>
+  pivot_longer(cols = x1960_yr1960:x2023_yr2023, names_to = "year", values_to = "value") |>
+  mutate(year = as.numeric(str_extract(year, "\\d{4}"))) |> # Extracts the 4-digit year number from the original dataset's incompatible year format
+  select(-series_code, -country_code) |>
+  pivot_wider(names_from = series_name, values_from = value) |>
+  mutate(country_code = case_when(
+    str_detect(country_name, "Kosovo") ~ "XKX", TRUE ~
+    countrycode(country_name, origin = "country.name", destination = "iso3c"))) |>
+  clean_names() |>
+  rename(gdp_pc = gdp_per_capita_ppp_constant_2021_international) |>
+  select(country_name, country_code, year, gdp_pc)
+
+# Creating a gdp growth rate variable to allow relative change comparisons
+
+wb_cleaned <- wb_wrangled |>
+  group_by(country_code) |>
+  mutate(gdp_pc_growth = (gdp_pc - lag(gdp_pc)) / lag(gdp_pc) * 100) |>
+  ungroup()
+  
+head(wb_cleaned)
+```
+
+# Validating Data
+
+## Validating Unmatched Country Codes
+
+```{r}
+#| label: validating_country_code
+
+# Creating a dataset list for validation
+
+unmatched_data_list <- list(eap_with_iso3, imf_cleaned, wb_cleaned)
+
+# Creating a function to check for unmatched country codes
+
+check_unmatched <- function(df){
+  df |>
+    filter(is.na(country_code)) |>
+    distinct(country_name)
+}
+
+# Applying the function to the dataset list
+
+map(unmatched_data_list, check_unmatched)
+```
+
+## Validating Duplicate Observations
+
+```{r}
+#| label: validating_duplicate_obs
+
+# Creating a dataset list for validation
+
+duplicates_data_list <- list(eap_cleaned, imf_cleaned, wb_cleaned)
+
+# Creating a function to check for duplicate observations
+
+check_duplicates <- function(df){
+  df |>
+    group_by(country_code, year) |>
+    drop_na(country_code) |> # Unmatched countries are removed due to minimal contributions to the scope of the research
+    filter(n() > 1) |>
+    arrange(country_code, year)
+  }
+
+# Applying the function to the dataset list
+
+map(duplicates_data_list, check_duplicates)
+```
+
+# Constructing the Complete Dataset
+
+## Merging All Datasets
+
+```{r}
+#| label: merging_datasets
+
+# Removing country names and unmatched country codes from all datasets due to minimal contributions to the scope of the research
+
+eap_final <- eap_cleaned |> filter(!is.na(country_code))
+wb_final <- wb_cleaned |> filter(!is.na(country_code)) |> select(-country_name)
+imf_final <- imf_cleaned |> filter(!is.na(country_code)) |> select(-country_name)
+
+# Joining all datasets using full_join()
+
+merge_data_list <- list(eap_final, imf_final, wb_final)
+
+merged_dataset <- reduce(merge_data_list, full_join, by = c("country_code", "year")) |>
+  filter(year >= 1960 & year <= 2023) |> # Filters time range to 1960-2023
+  mutate(country_code = as_factor(country_code)) |> # Converts country_code to a factor
+  arrange(country_code, year)
+
+head(merged_dataset)
+```
+
+## Finalizing the Complete Dataset
+
+```{r}
+#| label: finalizing_dataset
+
+# Adding country names by reverse matching the ISO3 country codes to their country names
+
+complete_dataset <- merged_dataset |>
+  mutate(country_name = case_when(
+                            str_detect(country_code, "XKX") ~ "Kosovo", TRUE ~
+                            countrycode(country_code, "iso3c", "country.name"))
+         ) |>
+
+  # Reformatting dataset for simpler and easier usage
+  
+  arrange(country_name, year) |>
+  mutate(country_name = as_factor(country_name)) |>
+  select(country_name, country_code, year, approval_smoothed, approval_growth,
+         gdp_pc, gdp_pc_growth, unemployment_rate, cpi_growth) |> # Rearranging column order
+
+  # Removing observations with zero values recorded for approval_smoothed or gdp_pc_growth (the independent and dependent variables of interest). This condition can be removed to construct a new dataset for other purposes
+  
+  group_by(country_code) |>
+  filter(!all(is.na(approval_smoothed) | is.na(gdp_pc_growth))) |>
+  ungroup() |>
+  arrange(country_name, year)
+
+complete_dataset
+```
+
+## Validating the Complete Dataset
+
+```{r}
+#| label: validating_complete_dataset
+
+# Validating for duplicate observations
+
+complete_dataset |>
+  group_by(country_name, year) |>
+  filter(n() > 1) |>
+  arrange(country_name, year)
+
+# Validating for NA values in country_code
+
+complete_dataset |>
+  filter(is.na(country_code))
+
+# Checking if any country has missing data for all variables
+
+complete_dataset |>
+  group_by(country_name) |>
+  filter(all(is.na(approval_smoothed)),
+         all(is.na(approval_growth)),
+         all(is.na(gdp_pc)),
+         all(is.na(gdp_pc_growth)),
+         all(is.na(unemployment_rate)),
+         all(is.na(cpi_growth))
+         ) |>
+  distinct(country_name)
+```
+
+# Visualizing Missing Data Over Time
+
+```{r}
+#| label: fig-missingness_over_time
+#| fig-width: 9
+#| fig-height: 7
+#| fig-cap: "**Proportion of missing data over time separated by variables**"
+
+# Choosing colors for lines
+
+variable_missingness_colors <- c("missing_approval_growth" =   "#ff7f0e", # Orange
+                                 "missing_approval_smoothed" = "#1f77b4", # Blue
+                                 "missing_gdp_pc" =            "#2ca02c", # Green
+                                 "missing_gdp_pc_growth" =     "#d62728", # Red
+                                 "missing_unemployment_rate" = "#9467bd", # Purple
+                                 "missing_cpi_growth" =        "#8c564b" # Brown
+                                 )
+
+# Choosing line types for lines. Added dashed lines to distinguish variables derived from other variables included in the visualization
+
+variable_missingness_linetypes <- c("missing_approval_growth" =   "solid",
+                                    "missing_approval_smoothed" = "dashed",
+                                    "missing_gdp_pc" =            "solid",
+                                    "missing_gdp_pc_growth" =     "dashed",
+                                    "missing_unemployment_rate" = "solid",
+                                    "missing_cpi_growth" =        "solid"
+                                    )
+
+# Visualizing and calculating missing data proportions for variables
+
+missingness_viz <- complete_dataset |>
+    group_by(year) |>
+    
+    ## Calculating proportion of missing data each year
+    
+    summarize(missing_approval_smoothed = mean(is.na(approval_smoothed)),
+              missing_approval_growth = mean(is.na(approval_growth)),
+              missing_gdp_pc = mean(is.na(gdp_pc)),
+              missing_gdp_pc_growth = mean(is.na(gdp_pc_growth)),
+              missing_unemployment_rate = mean(is.na(unemployment_rate)),
+              missing_cpi_growth = mean(is.na(cpi_growth))
+              ) |>
+    
+    ## Pivoting the table to a long format for the line plot
+    
+    pivot_longer(cols = starts_with("missing_"),
+                 names_to = "variable", values_to = "missing_proportion") |>
+    
+    ## Producing the line plot
+    
+    ggplot(aes(x = year, y = missing_proportion, color = variable, linetype = variable)) +
+    geom_line() +
+    scale_color_manual(values = variable_missingness_colors) +
+    scale_linetype_manual(values = variable_missingness_linetypes) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+    
+missingness_viz
+```
+
+# Replication
+
+This section will provide the necessary code to load and prepare the complete dataset for any data manipulation.
+
+```{r}
+#| label: dataset_replication
+
+# Reading complete dataset
+
+complete_dataset_link <- "https://raw.githubusercontent.com/adamcheng7/POLI-381-Data-Project/refs/heads/main/data/complete_dataset.csv"
+
+complete_dataset <- read_csv(complete_dataset_link) |>
+  mutate(country_code = as_factor(country_code),
+         country_name = as_factor(country_name)
+         )
+ 
+complete_dataset
+```
