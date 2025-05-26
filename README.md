@@ -29,16 +29,24 @@ The variables include:
 
 ## Data Source
 The data is sourced from the following:
-1. [World Bank](https://datacatalog.worldbank.org/search/dataset/0037712/World-Development-Indicators)
+1. [Executive Approval Project (EAP)](https://www.executiveapproval.org/)
 
-2. [Executive Approval Project (EAP)](https://www.executiveapproval.org/)
+2. [International Monetary Fund (IMF)](https://data.imf.org/?sk=4c514d48-b6ba-49ed-8ab9-52b0c1a0179b)
 
-3. [International Monetary Fund (IMF)](https://data.imf.org/?sk=4c514d48-b6ba-49ed-8ab9-52b0c1a0179b)
+3. [World Bank](https://datacatalog.worldbank.org/search/dataset/0037712/World-Development-Indicators)
 
 ## Directories
 - `data`: Contains the dataset
 
     - `complete_dataset.csv`: The complete dataset used for analysis
+
+    - `original_datasets`: Contains the original datasets collected from the listed data sources and used to create `complete_dataset.csv`
+
+        - `eap_data.csv`: Original dataset retrieved from the Executive Approval Project
+
+        - `imf_data.csv`: Original dataset retrieved from the International Monetary Fund
+
+        - `wb_data.csv`: Original dataset retrieved from the World Bank
 
 - `syntax`: Contains the syntax files used for data quality control and analysis
 
