@@ -36,7 +36,7 @@ The data is sourced from the following:
 3. [World Bank](https://datacatalog.worldbank.org/search/dataset/0037712/World-Development-Indicators)
 
 ## Directories
-- `data`: Contains the dataset
+- `data`: Contains the datasets used in the project
 
     - `complete_dataset.csv`: The complete dataset used for analysis
 
@@ -44,7 +44,7 @@ The data is sourced from the following:
 
         - `complete_dataset.RData`: The complete dataset in R data format
 
-    - `original_datasets`: Contains the original datasets collected from the listed data sources and used to create `complete_dataset.csv`
+    - `original_datasets`: Contains the original datasets collected from the listed data sources and used to create `complete_dataset`
 
         - `eap_data.csv`: Original dataset retrieved from the Executive Approval Project
 
@@ -52,7 +52,7 @@ The data is sourced from the following:
 
         - `wb_data.csv`: Original dataset retrieved from the World Bank
 
-- `syntax`: Contains the syntax files used for data quality control and analysis
+- `syntax`: Contains the syntax files created and used for this project
 
     - `dataset_construction.qmd`: Quarto Markdown file in R code documenting the project dataset construction process
 
@@ -81,7 +81,7 @@ The data is sourced from the following:
 
 - [Quarto](https://quarto.org/) for acceesing `.qmd` files
 
--  An Intergrated development environment (IDEs) or code editor of your choice ([VSCode](https://code.visualstudio.com/), [PyCharm](https://www.jetbrains.com/pycharm/), etc.) to run any R code
+-  An Intergrated development environment (IDE) or a code editor of your choice ([RStudio](https://posit.co/downloads/), [VSCode](https://code.visualstudio.com/), [PyCharm](https://www.jetbrains.com/pycharm/), etc.) to run R code
     - [RStudio](https://posit.co/downloads/) is recommended as it provides a user-friendly interface for R programming and data analysis
 
 ## Running the Code
@@ -95,7 +95,7 @@ The data is sourced from the following:
 
 - Run the code from top to bottom
 
-- **Note**: To generate publication ready files
+- **Note**: To generate publication ready documents from the `*.qmd` files...
     - Click on the "Render" button in RStudio or use the command line to render the file
 
     - The output will be saved in the same directory as the `*.qmd` file unless specified otherwise
