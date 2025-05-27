@@ -40,6 +40,10 @@ The data is sourced from the following:
 
     - `complete_dataset.csv`: The complete dataset used for analysis
 
+        - `complete_dataset.dta`: The complete dataset in Stata format
+
+        - `complete_dataset.RData`: The complete dataset in R data format
+
     - `original_datasets`: Contains the original datasets collected from the listed data sources and used to create `complete_dataset.csv`
 
         - `eap_data.csv`: Original dataset retrieved from the Executive Approval Project
